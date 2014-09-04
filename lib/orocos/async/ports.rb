@@ -25,26 +25,57 @@ module Orocos::Async::CORBA
                 reachable! reader
             end
             proxy_event @port,:unreachable
-            
-            @poll_timer = @event_loop.async_every(method(:raw_read_new), {:period => period, :start => false,
-                                                  :known_errors => Orocos::Async::KNOWN_ERRORS}) do |data,error|
-                if error
-                    @poll_timer.cancel
-                    self.period = @poll_timer.period
-                    @event_loop.once do
-                        event :error,error
-                    end
-                elsif data
-                    @raw_last_sample = data
-                    event :raw_data, data
-                    # TODO just emit raw_data and convert it to ruby
-                    # if someone is listening to (see PortProxy)
-                    event :data, Typelib.to_ruby(data)
-                end
-            end
-            @poll_timer.doc = port.full_name
         rescue Orocos::NotFound => e
             emit_error e
+        end
+
+        # Returns the poll timer.
+        def poll_timer
+            @poll_timer ||= begin
+                                period = @options[:period]
+                                timer = if @policy.key?(:type) && @policy[:type] == :buffer
+                                            async_call = Proc.new do
+                                                t1 = Time.now
+                                                while((data = raw_read_new) != nil) # sync call from bg thread
+                                                    @raw_last_sample = data
+                                                    event :raw_data, data
+                                                    # TODO just emit raw_data and convert it to ruby
+                                                    # if someone is listening to (see PortProxy)
+                                                    event :data, Typelib.to_ruby(data)
+                                                    break if (Time.now-t1).to_f >= period
+                                                end
+                                            end
+                                            @event_loop.async_every(async_call, {:period => period, :start => false,
+                                                                                 :known_errors => Orocos::Async::KNOWN_ERRORS}) do |data,error|
+                                                if error
+                                                    @poll_timer.cancel
+                                                    self.period = @poll_timer.period
+                                                    @event_loop.once do
+                                                        event :error,error
+                                                    end
+                                                end
+                                            end
+                                        else
+                                            @event_loop.async_every(method(:raw_read_new), {:period => period, :start => false,
+                                                                                            :known_errors => Orocos::Async::KNOWN_ERRORS}) do |data,error|
+                                                if error
+                                                    @poll_timer.cancel
+                                                    self.period = @poll_timer.period
+                                                    @event_loop.once do
+                                                        event :error,error
+                                                    end
+                                                elsif data
+                                                    @raw_last_sample = data
+                                                    event :raw_data, data
+                                                    # TODO just emit raw_data and convert it to ruby
+                                                    # if someone is listening to (see PortProxy)
+                                                    event :data, Typelib.to_ruby(data)
+                                                end
+                                            end
+                                        end
+                                timer.doc = port.full_name
+                                timer
+                            end
         end
 
         def last_sample
@@ -55,7 +86,7 @@ module Orocos::Async::CORBA
 
         # TODO keep timer and remote connection in mind
         def unreachable!(options = Hash.new)
-            @poll_timer.cancel
+            poll_timer.cancel
             @raw_last_sample = nil
 
             # ensure that this is always called from the
@@ -83,21 +114,21 @@ module Orocos::Async::CORBA
             super
             @policy = reader.policy
             if number_of_listeners(:data) != 0
-                @poll_timer.start period unless @poll_timer.running?
+                poll_timer.start period unless poll_timer.running?
             end
         end
 
         def period=(period)
             super
-            @poll_timer.period = self.period
+            poll_timer.period = self.period
         end
 
         def really_add_listener(listener)
             if listener.event == :data
-                @poll_timer.start(period) unless @poll_timer.running?
+                poll_timer.start(period) unless poll_timer.running?
                 listener.call Typelib.to_ruby(@raw_last_sample) if @raw_last_sample && listener.use_last_value?
             elsif listener.event == :raw_data
-                @poll_timer.start(period) unless @poll_timer.running?
+                poll_timer.start(period) unless poll_timer.running?
                 listener.call @raw_last_sample if @raw_last_sample && listener.use_last_value?
             end
             super
@@ -106,7 +137,7 @@ module Orocos::Async::CORBA
         def remove_listener(listener)
             super
             if number_of_listeners(:data) == 0 && number_of_listeners(:raw_data) == 0
-                @poll_timer.cancel
+                poll_timer.cancel
             end
         end
 

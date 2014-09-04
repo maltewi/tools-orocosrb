@@ -143,5 +143,23 @@ describe Orocos::Async::CORBA::OutputReader do
                 end
             end
         end
+
+        it "should read all data from a buffered connection even if the period of the reader is too large" do 
+            Orocos.run('simple_source') do
+                data = []
+                t1 = Orocos::Async::CORBA::TaskContext.new(ior('simple_source_source'))
+                port = t1.port("cycle",:type => :buffer,:size => 100,:period => 100)
+                port.on_data do |sample|
+                    data << sample
+                end
+                t1.configure
+                t1.start
+                1.upto(5) do |v|
+                    Orocos::Async.steps
+                    sleep 0.5
+                end
+                assert !data.empty?
+            end
+        end
     end
 end
