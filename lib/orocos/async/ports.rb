@@ -33,46 +33,14 @@ module Orocos::Async::CORBA
         def poll_timer
             @poll_timer ||= begin
                                 period = @options[:period]
-                                timer = if @policy.key?(:type) && @policy[:type] == :buffer
-                                            async_call = Proc.new do
-                                                t1 = Time.now
-                                                while((data = raw_read_new) != nil) # sync call from bg thread
-                                                    @raw_last_sample = data
-                                                    event :raw_data, data
-                                                    # TODO just emit raw_data and convert it to ruby
-                                                    # if someone is listening to (see PortProxy)
-                                                    event :data, Typelib.to_ruby(data)
-                                                    break if (Time.now-t1).to_f >= period
-                                                end
-                                            end
-                                            @event_loop.async_every(async_call, {:period => period, :start => false,
-                                                                                 :known_errors => Orocos::Async::KNOWN_ERRORS}) do |data,error|
-                                                if error
-                                                    @poll_timer.cancel
-                                                    self.period = @poll_timer.period
-                                                    @event_loop.once do
-                                                        event :error,error
-                                                    end
-                                                end
-                                            end
-                                        else
-                                            @event_loop.async_every(method(:raw_read_new), {:period => period, :start => false,
-                                                                                            :known_errors => Orocos::Async::KNOWN_ERRORS}) do |data,error|
-                                                if error
-                                                    @poll_timer.cancel
-                                                    self.period = @poll_timer.period
-                                                    @event_loop.once do
-                                                        event :error,error
-                                                    end
-                                                elsif data
-                                                    @raw_last_sample = data
-                                                    event :raw_data, data
-                                                    # TODO just emit raw_data and convert it to ruby
-                                                    # if someone is listening to (see PortProxy)
-                                                    event :data, Typelib.to_ruby(data)
-                                                end
-                                            end
-                                        end
+                                timeout= if @policy.key?(:type) && @policy[:type] == :buffer
+                                            period
+                                         else
+                                             0
+                                         end
+                                timer = @event_loop.async_every(method(:thread_read), {:period => period, :start => false,
+                                                                :known_errors => Orocos::Async::KNOWN_ERRORS},
+                                                                timeout,&method(:thread_read_callback))
                                 timer.doc = port.full_name
                                 timer
                             end
@@ -142,6 +110,31 @@ module Orocos::Async::CORBA
         end
 
         private
+        # blocking method called from thread pool to read new data
+        def thread_read(timeout)
+            t1 = Time.now
+            while(!(data = raw_read_new).nil?) # sync call from bg thread
+                @raw_last_sample = data
+                event :raw_data, data
+                # TODO just emit raw_data and convert it to ruby
+                # if someone is listening to (see PortProxy)
+                event :data, Typelib.to_ruby(data)
+                break if (Time.now-t1).to_f >= timeout
+            end
+            @raw_last_sample
+        end
+
+        # callback after thread_read returns called from the main thread
+        def thread_read_callback(data,error)
+            if error
+                poll_timer.cancel
+                self.period = poll_timer.period
+                @event_loop.once do
+                    event :error,error
+                end
+            end
+        end
+
         forward_to :@delegator_obj,:@event_loop,:known_errors => Orocos::Async::KNOWN_ERRORS,:on_error => :emit_error  do
             methods = Orocos::OutputReader.instance_methods.find_all{|method| nil == (method.to_s =~ /^do.*/)}
             methods -= Orocos::Async::CORBA::OutputReader.instance_methods
