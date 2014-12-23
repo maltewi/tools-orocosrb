@@ -626,7 +626,7 @@ module Orocos
 
                 changed_configurations =
                     begin load_file(file)
-                    rescue Orocos::NotFound
+                    rescue OroGen::TaskModelNotFound
                         ConfigurationManager.warn "ignoring configuration file #{file} as there are no corresponding task model"
                         next
                     end
@@ -663,12 +663,7 @@ module Orocos
 
             if !model || model.respond_to?(:to_str)
                 model_name = model || File.basename(file, '.yml')
-                begin
-                    model = Orocos.default_loader.task_model_from_name(model_name)
-                rescue OroGen::TaskModelNotFound
-                    ConfigurationManager.warn "ignoring configuration file #{file} as there are no corresponding task model"
-                    return false
-                end
+                model = Orocos.default_loader.task_model_from_name(model_name)
             end
 
             ConfigurationManager.info "loading configuration file #{file} for #{model.name}"
