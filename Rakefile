@@ -134,7 +134,7 @@ begin
         end
     end
 
-    task :test => 'setup:test'
+    task :test
     task :doc => :yard
     task :docs => :yard
     task :redoc => :yard
