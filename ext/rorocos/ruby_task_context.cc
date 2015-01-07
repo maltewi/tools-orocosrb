@@ -261,7 +261,7 @@ static VALUE local_task_context_remove_port(VALUE obj, VALUE _port_name)
 }
 
 /** call-seq:
- *     do_create_port(klass, port_name, orocos_type_name)
+ *     do_create_property(klass, port_name, orocos_type_name)
  *
  */
 static VALUE local_task_context_create_property(VALUE _task, VALUE _klass, VALUE _property_name, VALUE _type_name)
